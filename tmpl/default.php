@@ -166,6 +166,7 @@ $catalogUrl = $catalog_url ?? '';
 	}
 	
 	let searchTimeout;
+	let activeRequest;
 	
 	// Функция для поиска товаров
 	function searchProducts(query) {
@@ -181,8 +182,15 @@ $catalogUrl = $catalog_url ?? '';
 		// Формируем URL для AJAX запроса через стандартный механизм Joomla
 		const url = ajaxUrl + '&query=' + encodeURIComponent(query);
 		
+		// Устаревший запрос отменяем: на экране должен остаться ответ на последний ввод
+		if (activeRequest) {
+			activeRequest.abort();
+		}
+
+		activeRequest = new AbortController();
+
 		// Выполняем запрос
-		fetch(url)
+		fetch(url, { signal: activeRequest.signal })
 			.then(response => {
 				if (!response.ok) {
 					throw new Error('HTTP error ' + response.status);
@@ -201,6 +209,10 @@ $catalogUrl = $catalog_url ?? '';
 				}
 			})
 			.catch(error => {
+				if (error && error.name === 'AbortError') {
+					return;
+				}
+
 				resultsContainer.innerHTML = '<div class="search-autocomplete-no-results">' + escapeHtml(texts.error) + '</div>';
 			});
 	}
@@ -280,17 +292,41 @@ $catalogUrl = $catalog_url ?? '';
 		}
 	});
 	
-	// Обработчик кнопки поиска (редирект на страницу результатов)
+	// Переход по кнопке или Enter. Если запрос точно совпал с артикулом товара,
+	// ведём сразу на страницу товара, иначе на каталог со штатным поиском RadicalMart.
+	function submitSearch(query) {
+		const catalogUrl = <?php echo json_encode($catalogUrl, $jsonFlags); ?>;
+
+		const fallbackToCatalog = function() {
+			if (!catalogUrl) {
+				return;
+			}
+
+			const separator = catalogUrl.indexOf('?') !== -1 ? '&' : '?';
+			window.location.href = catalogUrl + separator + 'filter[search]=' + encodeURIComponent(query);
+		};
+
+		fetch(ajaxUrl + '&query=' + encodeURIComponent(query))
+			.then(response => response.ok ? response.json() : Promise.reject())
+			.then(response => {
+				const data = response.data || response;
+				const exactItem = data.items && data.items.find(item => item.code_exact && safeUrl(item.link));
+
+				if (exactItem) {
+					window.location.href = safeUrl(exactItem.link);
+					return;
+				}
+
+				fallbackToCatalog();
+			})
+			.catch(fallbackToCatalog);
+	}
+	
+	// Обработчик кнопки поиска
 	searchBtn.addEventListener('click', function() {
 		const query = searchInput.value.trim();
 		if (query.length >= minChars) {
-			// Редирект на страницу каталога с поиском
-			const catalogUrl = <?php echo json_encode($catalogUrl, $jsonFlags); ?>;
-			if (catalogUrl) {
-				// Добавляем параметр поиска к URL каталога
-				const separator = catalogUrl.indexOf('?') !== -1 ? '&' : '?';
-				window.location.href = catalogUrl + separator + 'filter[search]=' + encodeURIComponent(query);
-			}
+			submitSearch(query);
 		}
 	});
 	
