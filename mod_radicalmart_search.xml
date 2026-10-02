@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<extension type="module" client="site" method="upgrade">
+	<name>MOD_RADICALMART_SEARCH</name>
+	<author>Your Name</author>
+	<creationDate>November 2025</creationDate>
+	<copyright>(C) 2025</copyright>
+	<license>GNU General Public License version 2 or later</license>
+	<version>1.0.1</version>
+	<description>MOD_RADICALMART_SEARCH_DESC</description>
+
+	<namespace path="src">Joomla\Module\RadicalMartSearch</namespace>
+
+	<files>
+		<filename module="mod_radicalmart_search">mod_radicalmart_search.php</filename>
+		<filename>helper.php</filename>
+		<folder>services</folder>
+		<folder>src</folder>
+		<folder>tmpl</folder>
+	</files>
+
+	<languages>
+		<language tag="ru-RU">language/ru-RU/mod_radicalmart_search.ini</language>
+		<language tag="ru-RU">language/ru-RU/mod_radicalmart_search.sys.ini</language>
+	</languages>
+
+	<config>
+		<fields name="params">
+			<fieldset name="basic">
+				<field
+					name="button_text"
+					type="text"
+					label="MOD_RADICALMART_SEARCH_BUTTON_TEXT"
+					description="MOD_RADICALMART_SEARCH_BUTTON_TEXT_DESC"
+					default="Найти"
+				/>
+				
+				<field
+					name="placeholder"
+					type="text"
+					label="MOD_RADICALMART_SEARCH_PLACEHOLDER"
+					description="MOD_RADICALMART_SEARCH_PLACEHOLDER_DESC"
+					default="Поиск товаров..."
+				/>
+				
+				<field
+					name="min_chars"
+					type="number"
+					label="MOD_RADICALMART_SEARCH_MIN_CHARS"
+					description="MOD_RADICALMART_SEARCH_MIN_CHARS_DESC"
+					default="2"
+					min="1"
+					max="10"
+				/>
+				
+				<field
+					name="max_results"
+					type="number"
+					label="MOD_RADICALMART_SEARCH_MAX_RESULTS"
+					description="MOD_RADICALMART_SEARCH_MAX_RESULTS_DESC"
+					default="10"
+					min="1"
+					max="50"
+				/>
+				
+				<field
+					name="delay"
+					type="number"
+					label="MOD_RADICALMART_SEARCH_DELAY"
+					description="MOD_RADICALMART_SEARCH_DELAY_DESC"
+					default="300"
+					min="100"
+					max="2000"
+					step="100"
+				/>
+				
+				<field
+					name="menu_item"
+					type="menuitem"
+					label="MOD_RADICALMART_SEARCH_MENU_ITEM"
+					description="MOD_RADICALMART_SEARCH_MENU_ITEM_DESC"
+					filter="integer"
+				>
+					<option value="0">MOD_RADICALMART_SEARCH_MENU_ITEM_SELECT</option>
+				</field>
+			</fieldset>
+
+			<fieldset name="advanced">
+				<field
+					name="layout"
+					type="modulelayout"
+					label="JFIELD_ALT_LAYOUT_LABEL"
+					class="form-select"
+					validate="moduleLayout"
+				/>
+
+				<field
+					name="moduleclass_sfx"
+					type="textarea"
+					label="COM_MODULES_FIELD_MODULECLASS_SFX_LABEL"
+					rows="3"
+					validate="CssIdentifier"
+				/>
+
+				<field
+					name="cache"
+					type="list"
+					label="COM_MODULES_FIELD_CACHING_LABEL"
+					default="0"
+					filter="integer"
+					validate="options"
+				>
+					<option value="1">JGLOBAL_USE_GLOBAL</option>
+					<option value="0">COM_MODULES_FIELD_VALUE_NOCACHING</option>
+				</field>
+			</fieldset>
+		</fields>
+	</config>
+</extension>
+
