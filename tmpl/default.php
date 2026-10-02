@@ -3,13 +3,14 @@
  * @package     Joomla.Site
  * @subpackage  mod_radicalmart_search
  *
- * @copyright   (C) 2025
+ * @copyright   (C) 2025-2026 Dharma Design
  * @license     GNU General Public License version 2 or later
  */
 
 defined('_JEXEC') or die;
 
 use Joomla\CMS\Language\Text;
+use Joomla\CMS\Uri\Uri;
 
 /**
  * Template variables
@@ -23,6 +24,16 @@ $placeholder = $params->get('placeholder', 'Поиск товаров...');
 $buttonText = $params->get('button_text', 'Найти');
 $minChars = (int) $params->get('min_chars', 2);
 $delay = (int) $params->get('delay', 300);
+$maxResults = max(1, min(50, (int) $params->get('max_results', 10)));
+$ajaxUrl = Uri::root(true) . '/index.php?option=com_ajax&module=radicalmart_search&method=get&format=json&limit=' . $maxResults;
+$texts = [
+	'loading' => Text::_('MOD_RADICALMART_SEARCH_LOADING'),
+	'empty'   => Text::_('MOD_RADICALMART_SEARCH_NO_RESULTS'),
+	'error'   => Text::_('MOD_RADICALMART_SEARCH_ERROR'),
+	'article' => Text::_('MOD_RADICALMART_SEARCH_ARTICLE'),
+];
+// Безопасная вставка значений в <script>: теги, амперсанд и кавычки кодируются.
+$jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
 $moduleId = $module->id;
 $catalogUrl = $catalog_url ?? '';
 ?>
@@ -37,7 +48,7 @@ $catalogUrl = $catalog_url ?? '';
 			autocomplete="off"
 		/>
 		<button type="button" class="btn btn-primary" id="radicalmart-search-btn-<?php echo $moduleId; ?>">
-			<?php echo Text::_($buttonText); ?>
+			<?php echo htmlspecialchars(Text::_($buttonText), ENT_QUOTES, 'UTF-8'); ?>
 		</button>
 		
 		<!-- Контейнер для автодополнения -->
@@ -112,6 +123,12 @@ $catalogUrl = $catalog_url ?? '';
 	overflow: hidden;
 }
 
+.search-autocomplete-item-code {
+	font-size: 12px;
+	color: #777;
+	margin-bottom: 2px;
+}
+
 .search-autocomplete-item-price {
 	font-size: 14px;
 	color: #28a745;
@@ -137,6 +154,8 @@ $catalogUrl = $catalog_url ?? '';
 	const moduleId = '<?php echo $moduleId; ?>';
 	const minChars = <?php echo $minChars; ?>;
 	const delay = <?php echo $delay; ?>;
+	const ajaxUrl = <?php echo json_encode($ajaxUrl, $jsonFlags); ?>;
+	const texts = <?php echo json_encode($texts, $jsonFlags); ?>;
 	
 	const searchInput = document.getElementById('radicalmart-search-input-' + moduleId);
 	const searchBtn = document.getElementById('radicalmart-search-btn-' + moduleId);
@@ -156,11 +175,11 @@ $catalogUrl = $catalog_url ?? '';
 		}
 		
 		// Показываем индикатор загрузки
-		resultsContainer.innerHTML = '<div class="search-autocomplete-loading">Поиск...</div>';
+		resultsContainer.innerHTML = '<div class="search-autocomplete-loading">' + escapeHtml(texts.loading) + '</div>';
 		resultsContainer.classList.add('show');
 		
 		// Формируем URL для AJAX запроса через стандартный механизм Joomla
-		const url = '/index.php?option=com_ajax&module=radicalmart_search&method=get&format=json&query=' + encodeURIComponent(query);
+		const url = ajaxUrl + '&query=' + encodeURIComponent(query);
 		
 		// Выполняем запрос
 		fetch(url)
@@ -177,36 +196,38 @@ $catalogUrl = $catalog_url ?? '';
 				if (data.success && data.items) {
 					displayResults(data);
 				} else {
-					resultsContainer.innerHTML = '<div class="search-autocomplete-no-results">' + 
-						(data.message || 'Ошибка при поиске') + '</div>';
+					// Текст ошибки сервера посетителю не показываем.
+					resultsContainer.innerHTML = '<div class="search-autocomplete-no-results">' + escapeHtml(texts.error) + '</div>';
 				}
 			})
 			.catch(error => {
-				resultsContainer.innerHTML = '<div class="search-autocomplete-no-results">Ошибка при поиске</div>';
+				resultsContainer.innerHTML = '<div class="search-autocomplete-no-results">' + escapeHtml(texts.error) + '</div>';
 			});
 	}
 	
 	// Функция для отображения результатов
 	function displayResults(data) {
 		if (!data || !data.items || data.items.length === 0) {
-			resultsContainer.innerHTML = '<div class="search-autocomplete-no-results">Ничего не найдено</div>';
+			resultsContainer.innerHTML = '<div class="search-autocomplete-no-results">' + escapeHtml(texts.empty) + '</div>';
 			return;
 		}
 		
 		let html = '';
 		data.items.forEach(function(item) {
-			const imageUrl = item.image || '';
+			const imageUrl = safeUrl(item.image || '');
 			const price = item.price || '';
-			// Форматируем цену с валютой
-			const priceFormatted = price ? formatNumber(price) + ' ₽' : '';
+			// Строка цены от RadicalMart (с валютой или текстом вроде «Цена по запросу»)
+			// важнее числа: так валюта не зашита в модуль.
+			const priceFormatted = item.price_string ? String(item.price_string) : (price ? formatNumber(price) + ' ₽' : '');
+			const codeLine = item.code ? escapeHtml(texts.article + ' ' + item.code) : '';
 			
-			// Используем обычную конкатенацию вместо template literal
-			// (template literals конфликтуют с обработчиком Joomla)
-			html += '<a href="' + (item.link || '#') + '" class="search-autocomplete-item text-decoration-none">';
-			html += imageUrl ? '<img src="' + imageUrl + '" alt="' + escapeHtml(item.title) + '" />' : '<div style="width:50px;height:50px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;"><svg width="24" height="24" fill="#999"><use href="#icon-image"/></svg></div>';
+			// Все значения экранируются: ссылка и картинка идут в атрибуты.
+			html += '<a href="' + escapeHtml(safeUrl(item.link || '#') || '#') + '" class="search-autocomplete-item text-decoration-none">';
+			html += imageUrl ? '<img src="' + escapeHtml(imageUrl) + '" alt="' + escapeHtml(item.title) + '" />' : '<div style="width:50px;height:50px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;"><svg width="24" height="24" fill="#999"><use href="#icon-image"/></svg></div>';
 			html += '<div class="search-autocomplete-item-info">';
 			html += '<div class="search-autocomplete-item-title">' + escapeHtml(item.title) + '</div>';
-			html += priceFormatted ? '<div class="search-autocomplete-item-price">' + priceFormatted + '</div>' : '';
+			html += codeLine ? '<div class="search-autocomplete-item-code">' + codeLine + '</div>' : '';
+			html += priceFormatted ? '<div class="search-autocomplete-item-price">' + escapeHtml(priceFormatted) + '</div>' : '';
 			html += '</div>';
 			html += '</a>';
 		});
@@ -219,11 +240,20 @@ $catalogUrl = $catalog_url ?? '';
 		return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 	}
 	
-	// Функция для экранирования HTML
+	// Функция для экранирования HTML (в том числе кавычек для атрибутов)
 	function escapeHtml(text) {
-		const div = document.createElement('div');
-		div.textContent = text;
-		return div.innerHTML;
+		return String(text === null || text === undefined ? '' : text)
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#039;');
+	}
+	
+	// Допускаем только http(s) и адреса от корня сайта; всё остальное (javascript:, data:) отбрасываем
+	function safeUrl(url) {
+		url = String(url || '').trim();
+		return /^(https?:\/\/|\/(?!\/))/i.test(url) ? url : '';
 	}
 	
 	// Обработчик ввода в поле поиска
@@ -255,11 +285,11 @@ $catalogUrl = $catalog_url ?? '';
 		const query = searchInput.value.trim();
 		if (query.length >= minChars) {
 			// Редирект на страницу каталога с поиском
-			const catalogUrl = <?php echo json_encode($catalogUrl); ?>;
+			const catalogUrl = <?php echo json_encode($catalogUrl, $jsonFlags); ?>;
 			if (catalogUrl) {
 				// Добавляем параметр поиска к URL каталога
 				const separator = catalogUrl.indexOf('?') !== -1 ? '&' : '?';
-				window.location.href = catalogUrl + separator + 'filter[fields][poisk]=' + encodeURIComponent(query);
+				window.location.href = catalogUrl + separator + 'filter[search]=' + encodeURIComponent(query);
 			}
 		}
 	});

@@ -3,7 +3,7 @@
  * @package     Joomla.Site
  * @subpackage  mod_radicalmart_search
  *
- * @copyright   (C) 2025
+ * @copyright   (C) 2025-2026 Dharma Design
  * @license     GNU General Public License version 2 or later
  */
 

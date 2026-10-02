@@ -3,7 +3,7 @@
  * @package     Joomla.Site
  * @subpackage  mod_radicalmart_search
  *
- * @copyright   (C) 2025
+ * @copyright   (C) 2025-2026 Dharma Design
  * @license     GNU General Public License version 2 or later
  */
 
@@ -12,6 +12,8 @@ namespace Joomla\Module\RadicalMartSearch\Site\Helper;
 \defined('_JEXEC') or die;
 
 use Joomla\CMS\Factory;
+use Joomla\CMS\Log\Log;
+use Joomla\Database\DatabaseInterface;
 use Joomla\CMS\Router\Route;
 use Joomla\CMS\Uri\Uri;
 use Joomla\Component\RadicalMart\Site\Helper\RouteHelper;
@@ -38,20 +40,8 @@ class RadicalMartSearchHelper
 		}
 		else
 		{
-			$app = Factory::getApplication();
-			
-			// Fallback: пытаемся использовать текущую категорию, если мы на странице каталога
-			if ($app->input->get('option') === 'com_radicalmart'
-				&& $app->input->get('view') === 'category'
-				&& $app->input->getInt('id'))
-			{
-				$link = RouteHelper::getCategoryViewRoute($app->input->getInt('id'));
-			}
-			else
-			{
-				// Используем корневую категорию
-				$link = RouteHelper::getCategoryViewRoute(1);
-			}
+			// Глобальный поиск: всегда ведём на корневую категорию
+			$link = RouteHelper::getCategoryViewRoute(1);
 		}
 
 		return Route::link('site', $link);
@@ -63,10 +53,12 @@ class RadicalMartSearchHelper
 	 *
 	 * @since  1.0.0
 	 */
-	public static function getAjax()
+	public static function getAjax(): array
 	{
 		$app   = Factory::getApplication();
-		$query = $app->input->getString('query', '');
+		$input = $app->getInput();
+		$query = trim($input->getString('query', ''));
+		$limit = min(50, max(1, $input->getInt('limit', 10)));
 
 		if (empty($query) || mb_strlen($query) < 2)
 		{
@@ -82,48 +74,31 @@ class RadicalMartSearchHelper
 			// Load language
 			$app->getLanguage()->load('com_radicalmart');
 
-			// Используем модель Products с правильным контекстом.
-			// 'filter.search' - штатный ключ текстового поиска RadicalMart (title/introtext/
-			// fulltext/search_text), расширенный полем 'code' (артикул) через
-			// plg_radicalmart_searchcode (onRadicalMartAddFilterSearchListQuery).
-			$app->input->set('filter', ['search' => $query]);
-			
-			$model = $app->bootComponent('com_radicalmart')->getMVCFactory()
-				->createModel('Products', 'Site', ['ignore_request' => false]);
-			
-			// The RadicalMart text search also checks descriptions, fields and
-			// search_text. Load a wider window here and apply the autocomplete's
-			// stricter title matching below, otherwise an irrelevant match can
-			// occupy one of the first ten suggestions.
-			$model->setState('list.limit', 50);
-			$model->setState('list.start', 0);
-			
-			// Get products
-			$items = $model->getItems();
+			// Стандартный поиск RadicalMart не включает поле `code`, поэтому
+			// сначала получаем совпадения по артикулу и выводим их первыми.
+			$normalizedCode = self::normalizeCode($query);
+			$codeIds = self::getProductIdsByCode($normalizedCode, $limit);
+			$titleIds = self::getProductIdsByTitle($query, $limit);
+			$items    = [];
+
+			// Для подсказок ищем по артикулу и названию. Поиск по описанию и
+			// характеристикам давал нерелевантную спецтехнику: в её описаниях
+			// встречалось слово «бетон».
+			foreach (array_merge(self::getProductsByIds($codeIds), self::getProductsByIds($titleIds)) as $item)
+			{
+				if (!isset($items[(int) $item->id]) && count($items) < $limit)
+				{
+					$items[(int) $item->id] = $item;
+				}
+			}
+
+			$items = array_values($items);
 
 			$results = [];
-			$seenTitles = [];
 			if (!empty($items))
 			{
 				foreach ($items as $item)
 				{
-					// Autocomplete should answer what is typed in the product name,
-					// not a coincidental fragment in a description or custom field.
-					if (!static::titleMatchesSearch($item->title ?? '', $query)
-						&& !static::codeMatchesSearch($item->code ?? '', $query))
-					{
-						continue;
-					}
-
-					// Products and their meta/variant records can have the same
-					// title. Showing the same suggestion twice is not useful.
-					$titleKey = static::normalizeSearchText((string) ($item->title ?? ''));
-					if ($titleKey === '' || isset($seenTitles[$titleKey]))
-					{
-						continue;
-					}
-					$seenTitles[$titleKey] = true;
-
 					// Используем уже сформированную ссылку из модели
 					$productLink = !empty($item->link) ? $item->link : '#';
 					
@@ -155,17 +130,21 @@ class RadicalMartSearchHelper
 						$image = $baseUrl . '/' . ltrim($image, '/');
 					}
 
-					// Get price
-					$price = '';
+					// Get price. final_string also lets pricing plugins return text
+					// such as "Цена по запросу" instead of an artificial zero price.
+					$price       = '';
+					$priceString = '';
 					if (!empty($item->price))
 					{
-						if (is_object($item->price) && isset($item->price->final))
+						if (is_object($item->price))
 						{
-							$price = $item->price->final;
+							$price       = $item->price->final ?? '';
+							$priceString = $item->price->final_string ?? '';
 						}
-						elseif (is_array($item->price) && isset($item->price['final']))
+						elseif (is_array($item->price))
 						{
-							$price = $item->price['final'];
+							$price       = $item->price['final'] ?? '';
+							$priceString = $item->price['final_string'] ?? '';
 						}
 						else
 						{
@@ -176,9 +155,13 @@ class RadicalMartSearchHelper
 					$results[] = [
 						'id'       => $item->id,
 						'title'    => $item->title,
+						'code'     => $item->code ?? '',
+						'code_exact' => !empty($item->code)
+							&& self::normalizeCode($item->code) === $normalizedCode,
 						'link'     => $productLink,
 						'image'    => $image,
 						'price'    => $price,
+						'price_string' => $priceString,
 						'in_stock' => !empty($item->in_stock)
 					];
 				}
@@ -190,92 +173,156 @@ class RadicalMartSearchHelper
 				'total'   => count($results)
 			];
 		}
-		catch (\Exception $e)
+		catch (\Throwable $e)
 		{
+			// Подробности остаются в логе: текст исключения может раскрыть
+			// внутреннее устройство сайта (запросы, пути), посетителю он не нужен.
+			Log::addLogger(['text_file' => 'mod_radicalmart_search.php'], Log::ERROR, ['mod_radicalmart_search']);
+			Log::add($e->getMessage(), Log::ERROR, 'mod_radicalmart_search');
+
 			return [
 				'success' => false,
 				'items'   => [],
-				'message' => 'Ошибка при поиске: ' . $e->getMessage()
+				'message' => 'Ошибка при поиске'
 			];
 		}
 	}
 
 	/**
-	 * Check all query words against the product title.
+	 * Escapes LIKE wildcards so that "%" and "_" typed by a visitor are searched
+	 * literally instead of matching everything.
 	 *
-	 * @param   string  $title  Product title.
-	 * @param   string  $query  User input.
-	 *
-	 * @return  bool
-	 */
-	private static function titleMatchesSearch(string $title, string $query): bool
-	{
-		$title = static::normalizeSearchText($title);
-		$terms = static::searchTerms($query);
-
-		if ($title === '' || empty($terms))
-		{
-			return false;
-		}
-
-		foreach ($terms as $term)
-		{
-			if (mb_strpos($title, $term) === false)
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	/**
-	 * Keep article-number lookup working without allowing arbitrary metadata
-	 * matches into the title-oriented autocomplete.
-	 *
-	 * @param   string  $code   Product code.
-	 * @param   string  $query  User input.
-	 *
-	 * @return  bool
-	 */
-	private static function codeMatchesSearch(string $code, string $query): bool
-	{
-		$code = static::normalizeSearchText($code);
-		$query = static::normalizeSearchText($query);
-
-		return $code !== '' && $query !== '' && mb_strpos($code, $query) !== false;
-	}
-
-	/**
-	 * Normalize text for case-insensitive Cyrillic/Latin matching.
-	 *
-	 * @param   string  $value  Text to normalize.
+	 * @param   string  $value  Raw search text.
 	 *
 	 * @return  string
 	 */
-	private static function normalizeSearchText(string $value): string
+	private static function escapeLike(string $value): string
 	{
-		$value = mb_strtolower(trim($value), 'UTF-8');
-		$value = str_replace('ё', 'е', $value);
-		$value = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $value) ?? '';
-
-		return trim($value);
+		return addcslashes($value, '%_\\');
 	}
 
 	/**
-	 * Split user input into meaningful search terms.
+	 * Finds matching published product IDs by normalized article number.
+	 * Spaces and hyphens in a visitor's query are ignored, so PL359 and PL-359
+	 * produce the same result.
 	 *
-	 * @param   string  $query  User input.
+	 * @param   string  $search  Visitor search query.
+	 * @param   int     $limit   Maximum number of IDs.
 	 *
-	 * @return  string[]
+	 * @return  int[]
 	 */
-	private static function searchTerms(string $query): array
+	private static function getProductIdsByCode(string $search, int $limit): array
 	{
-		$normalized = static::normalizeSearchText($query);
+		if ($search === '')
+		{
+			return [];
+		}
 
-		return array_values(array_filter(explode(' ', $normalized), static function (string $term): bool {
-			return mb_strlen($term, 'UTF-8') >= 2;
-		}));
+		/** @var DatabaseInterface $db */
+		$db         = Factory::getContainer()->get(DatabaseInterface::class);
+		$column     = "REPLACE(REPLACE(UPPER(" . $db->quoteName('code') . "), '-', ''), ' ', '')";
+		$searchCode = '%' . self::escapeLike(mb_strtoupper($search)) . '%';
+		$exactCode  = mb_strtoupper($search);
+		$query      = $db->getQuery(true)
+			->select($db->quoteName('id'))
+			->from($db->quoteName('#__radicalmart_products'))
+			->where($db->quoteName('state') . ' = 1')
+			->where($column . ' LIKE :search_code')
+			->order('CASE WHEN ' . $column . ' = :exact_code THEN 0 ELSE 1 END')
+			->order($db->quoteName('id') . ' DESC')
+			->bind(':search_code', $searchCode)
+			->bind(':exact_code', $exactCode);
+
+		return array_map('intval', $db->setQuery($query, 0, $limit)->loadColumn());
+	}
+
+	/**
+	 * Finds published product IDs by title for the autocomplete list.
+	 *
+	 * @param   string  $search  Visitor search query.
+	 * @param   int     $limit   Maximum number of IDs.
+	 *
+	 * @return  int[]
+	 */
+	private static function getProductIdsByTitle(string $search, int $limit): array
+	{
+		$search = trim($search);
+
+		if ($search === '')
+		{
+			return [];
+		}
+
+		/** @var DatabaseInterface $db */
+		$db          = Factory::getContainer()->get(DatabaseInterface::class);
+		$searchText  = '%' . str_replace(' ', '%', self::escapeLike($search)) . '%';
+		$exactTitle  = self::escapeLike($search);
+		$query       = $db->getQuery(true)
+			->select($db->quoteName('id'))
+			->from($db->quoteName('#__radicalmart_products'))
+			->where($db->quoteName('state') . ' = 1')
+			->where($db->quoteName('title') . ' LIKE :search_title')
+			->order('CASE WHEN ' . $db->quoteName('title') . ' LIKE :exact_title THEN 0 ELSE 1 END')
+			->order($db->quoteName('id') . ' DESC')
+			->bind(':search_title', $searchText)
+			->bind(':exact_title', $exactTitle);
+
+		return array_map('intval', $db->setQuery($query, 0, $limit)->loadColumn());
+	}
+
+	/**
+	 * Normalizes an article for a tolerant comparison.
+	 *
+	 * @param   string  $code  Product code or visitor query.
+	 *
+	 * @return  string
+	 */
+	private static function normalizeCode(string $code): string
+	{
+		return mb_strtoupper((string) preg_replace('/[\s-]+/u', '', $code));
+	}
+
+	/**
+	 * Loads products through RadicalMart's own model so prices, links, images
+	 * and third-party price plugins are prepared exactly as in the catalogue.
+	 *
+	 * @param   int[]  $ids  Product IDs ordered by relevance.
+	 *
+	 * @return  object[]
+	 *
+	 * @throws  \Exception
+	 */
+	private static function getProductsByIds(array $ids): array
+	{
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		$app   = Factory::getApplication();
+		$model = $app->bootComponent('com_radicalmart')->getMVCFactory()
+			->createModel('Products', 'Site', ['ignore_request' => false]);
+		// Initialise normal site-model state before replacing only the filters
+		// required for article matches.
+		$model->getState();
+		$model->setState('category.id', 1);
+		$model->setState('filter.item_id', $ids);
+		$model->setState('filter.item_id.include', true);
+		$model->setState('filter.search', '');
+		$model->setState('list.limit', count($ids));
+		$model->setState('list.start', 0);
+
+		$items  = $model->getItems();
+		$indexed = [];
+		foreach ($items as $item)
+		{
+			$indexed[(int) $item->id] = $item;
+		}
+
+		return array_values(array_filter(array_map(
+			static fn(int $id) => $indexed[$id] ?? null,
+			$ids
+		)));
 	}
 }
 
