@@ -5,8 +5,11 @@
 	<creationDate>October 2026</creationDate>
 	<copyright>Copyright (C) 2025-2026 Dharma Design. All rights reserved.</copyright>
 	<license>GNU General Public License version 2 or later</license>
-	<version>1.2.0</version>
+	<version>1.2.1</version>
 	<description>MOD_RADICALMART_SEARCH_DESC</description>
+	<updateservers>
+		<server type="extension" name="RadicalMart AJAX Search Updates">https://raw.githubusercontent.com/shivayanamahom/radicalmart-ajax-search/main/updates.xml</server>
+	</updateservers>
 
 	<namespace path="src">Joomla\Module\RadicalMartSearch</namespace>
 
@@ -118,4 +121,3 @@
 		</fields>
 	</config>
 </extension>
-

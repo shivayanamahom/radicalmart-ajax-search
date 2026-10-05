@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<updates>
+	<update>
+		<name>RadicalMart AJAX Search</name>
+		<description>AJAX live search module for RadicalMart</description>
+		<element>mod_radicalmart_search</element>
+		<type>module</type>
+		<version>1.2.1</version>
+		<client>site</client>
+		<downloads>
+			<downloadurl type="full" format="zip">https://github.com/shivayanamahom/radicalmart-ajax-search/releases/download/v1.2.1/mod_radicalmart_search_1.2.1.zip</downloadurl>
+		</downloads>
+		<sha256>40c1c378c629b69d1779726518d164fb2f8194a22960754c84ecbfbd5d0229be</sha256>
+	</update>
+</updates>
