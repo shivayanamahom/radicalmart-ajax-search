@@ -1,5 +1,9 @@
 # RadicalMart: AJAX-поиск товаров (mod_radicalmart_search)
 
+[![Release](https://img.shields.io/github/v/release/shivayanamahom/radicalmart-ajax-search?color=blue)](https://github.com/shivayanamahom/radicalmart-ajax-search/releases)
+[![Joomla](https://img.shields.io/badge/Joomla-5.x%20%7C%206.x-orange.svg)](https://www.joomla.org/)
+[![RadicalMart](https://img.shields.io/badge/RadicalMart-3-2f5bff.svg)](https://radicalmart.ru/)
+
 <!-- ai-notice -->
 > [!NOTE]
 > **О проекте.** Этот проект написан при помощи ИИ для моего собственного использования и опубликован «как есть» (*as is*). Он может содержать ошибки и подходить не для всех сайтов и версий Joomla. Гарантий, поддержки и сроков исправления я не обещаю. Перед использованием изучите код и проверьте его на тестовой копии сайта, всё на ваш риск. Идеи и замечания приветствуются (Issues, Pull Request), но отвечу и приму их не обязательно.
